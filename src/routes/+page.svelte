@@ -13,7 +13,7 @@
 	import FluidSimulation from '$lib/FluidSimulation.svelte';
 
 	const MAX_GRAVITY = 9.81;
-	const MAX_GAS_GRAVITY = 8;
+	const MAX_GAS_GRAVITY = 6;
 
 
 	type AppState = 'loading' | 'needs-permission' | 'ready' | 'denied' | 'not-supported';
