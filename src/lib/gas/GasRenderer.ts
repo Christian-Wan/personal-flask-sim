@@ -167,9 +167,9 @@ export class GasRenderer {
 
         // Adjust parameters for mobile performance
         if (this.isMobile) {
-            this.influenceRadius = 0.25;  // Smaller blobs for faster rendering
-            this.accumScale = 0.25;       // Higher scale to reduce accumulation passes
-            this.threshold = 0.15;        // Lower threshold for more visible fluid
+            this.influenceRadius = 0.20;  // Smaller blobs for faster rendering
+            this.accumScale = 0.35;       // Higher scale to reduce accumulation passes
+            this.threshold = 0;        // Lower threshold for more visible fluid
         }
 
         gl.enable(gl.BLEND);
