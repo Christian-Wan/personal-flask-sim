@@ -296,102 +296,66 @@ export class GasRenderer {
         const w = gl.canvas.width;
         const h = gl.canvas.height;
 
-        if (this.isMobile) {
-            // Simplified fluid rendering on mobile: direct particle rendering without accumulation
-            gl.blendFunc(gl.ONE, gl.ONE);  // Additive blending for fluid-like effect
+        // For mobile, use lower resolution accumulation to improve performance
+        const accumW = this.isMobile ? Math.floor(w * 0.75) : w;
+        const accumH = this.isMobile ? Math.floor(h * 0.75) : h;
 
-            gl.useProgram(this.pointShader);
-            gl.uniform2f(this.pointShaderUniforms.domainSize, config.simWidth, config.simHeight);
-            const pointSize = 2.0 * fluid.particleRadius / config.simWidth * w * 0.8;  // Smaller on mobile
-            gl.uniform1f(this.pointShaderUniforms.pointSize, pointSize);
-            gl.uniform1f(this.pointShaderUniforms.drawDisk, 1.0);
+        this.ensureAccumFramebuffer(accumW, accumH);
 
-            const posLoc = this.pointShaderAttribs.attrPosition;
-            const colorLoc = this.pointShaderAttribs.attrColor;
-            const alphaLoc = this.pointShaderAttribs.attrAlpha;
-            gl.enableVertexAttribArray(posLoc);
-            gl.enableVertexAttribArray(colorLoc);
-            gl.enableVertexAttribArray(alphaLoc);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.accumFramebuffer);
+        gl.viewport(0, 0, accumW, accumH);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.blendFunc(gl.ONE, gl.ONE);
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.pointVertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, fluid.particlePos.subarray(0, 2 * fluid.numParticles), gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.useProgram(this.accumShader);
+        gl.uniform2f(this.accumShaderUniforms.domainSize, config.simWidth, config.simHeight);
+        gl.uniform1f(this.accumShaderUniforms.accumScale, this.accumScale);
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.pointColorBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, fluid.particleColor.subarray(0, 4 * fluid.numParticles), gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 16, 0);
-            gl.vertexAttribPointer(alphaLoc, 1, gl.FLOAT, false, 16, 12);
+        const radiusPx = this.influenceRadius / config.simWidth * accumW;
+        gl.uniform1f(this.accumShaderUniforms.radiusPx, radiusPx);
 
-            gl.drawArrays(gl.POINTS, 0, fluid.numParticles);
+        const posLoc = this.accumShaderAttribs.attrPosition;
+        const colorLoc = this.accumShaderAttribs.attrColor;
+        const alphaLoc = this.accumShaderAttribs.attrAlpha;
+        gl.enableVertexAttribArray(posLoc);
+        gl.enableVertexAttribArray(colorLoc);
+        gl.enableVertexAttribArray(alphaLoc);
 
-            gl.disableVertexAttribArray(posLoc);
-            gl.disableVertexAttribArray(colorLoc);
-            gl.disableVertexAttribArray(alphaLoc);
-            gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.pointVertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, fluid.particlePos.subarray(0, 2 * fluid.numParticles), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);  // Restore default blending
-        } else {
-            // Full accumulation rendering on desktop
-            const accumW = w;
-            const accumH = h;
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.pointColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, fluid.particleColor.subarray(0, 4 * fluid.numParticles), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 16, 0);
+        gl.vertexAttribPointer(alphaLoc, 1, gl.FLOAT, false, 16, 12);
 
-            this.ensureAccumFramebuffer(accumW, accumH);
+        gl.drawArrays(gl.POINTS, 0, fluid.numParticles);
+        gl.disableVertexAttribArray(posLoc);
+        gl.disableVertexAttribArray(colorLoc);
+        gl.disableVertexAttribArray(alphaLoc);
 
-            gl.bindFramebuffer(gl.FRAMEBUFFER, this.accumFramebuffer);
-            gl.viewport(0, 0, accumW, accumH);
-            gl.clearColor(0, 0, 0, 0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
-            gl.blendFunc(gl.ONE, gl.ONE);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, w, h);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-            gl.useProgram(this.accumShader);
-            gl.uniform2f(this.accumShaderUniforms.domainSize, config.simWidth, config.simHeight);
-            gl.uniform1f(this.accumShaderUniforms.accumScale, this.accumScale);
+        gl.useProgram(this.compositeShader);
+        gl.uniform1i(this.compositeShaderUniforms.accumTex, 0);
+        gl.uniform1f(this.compositeShaderUniforms.threshold, this.threshold);
 
-            const radiusPx = this.influenceRadius / config.simWidth * accumW;
-            gl.uniform1f(this.accumShaderUniforms.radiusPx, radiusPx);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
 
-            const posLoc = this.accumShaderAttribs.attrPosition;
-            const colorLoc = this.accumShaderAttribs.attrColor;
-            const alphaLoc = this.accumShaderAttribs.attrAlpha;
-            gl.enableVertexAttribArray(posLoc);
-            gl.enableVertexAttribArray(colorLoc);
-            gl.enableVertexAttribArray(alphaLoc);
+        const qPosLoc = this.compositeShaderAttribs.attrPosition;
+        gl.enableVertexAttribArray(qPosLoc);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
+        gl.vertexAttribPointer(qPosLoc, 2, gl.FLOAT, false, 0, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.pointVertexBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, fluid.particlePos.subarray(0, 2 * fluid.numParticles), gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.pointColorBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, fluid.particleColor.subarray(0, 4 * fluid.numParticles), gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(colorLoc, 3, gl.FLOAT, false, 16, 0);
-            gl.vertexAttribPointer(alphaLoc, 1, gl.FLOAT, false, 16, 12);
-
-            gl.drawArrays(gl.POINTS, 0, fluid.numParticles);
-            gl.disableVertexAttribArray(posLoc);
-            gl.disableVertexAttribArray(colorLoc);
-            gl.disableVertexAttribArray(alphaLoc);
-
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.viewport(0, 0, w, h);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-
-            gl.useProgram(this.compositeShader);
-            gl.uniform1i(this.compositeShaderUniforms.accumTex, 0);
-            gl.uniform1f(this.compositeShaderUniforms.threshold, this.threshold);
-
-            gl.activeTexture(gl.TEXTURE0);
-            gl.bindTexture(gl.TEXTURE_2D, this.accumTexture);
-
-            const qPosLoc = this.compositeShaderAttribs.attrPosition;
-            gl.enableVertexAttribArray(qPosLoc);
-            gl.bindBuffer(gl.ARRAY_BUFFER, this.quadBuffer);
-            gl.vertexAttribPointer(qPosLoc, 2, gl.FLOAT, false, 0, 0);
-            gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-            gl.disableVertexAttribArray(qPosLoc);
-            gl.bindBuffer(gl.ARRAY_BUFFER, null);
-            gl.bindTexture(gl.TEXTURE_2D, null);
-        }
+        gl.disableVertexAttribArray(qPosLoc);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
     }
 
     private renderPoints(fluid: FlipGas, config: RenderConfig): void {
